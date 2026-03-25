@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Document Convertor — PDF to Word</title>
+    <!-- PDF.js for client-side PDF text extraction -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <!-- docx.js for client-side .docx generation -->
+    <script src="https://unpkg.com/docx@9.6.1/build/index.umd.js"></script>
     <style>
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -149,14 +153,18 @@
     </div>
 
     <script>
-      const dropZone = document.getElementById('dropZone');
-      const fileInput = document.getElementById('fileInput');
-      const browseLink = document.getElementById('browseLink');
-      const fileNameEl = document.getElementById('fileName');
-      const convertBtn = document.getElementById('convertBtn');
-      const statusEl = document.getElementById('status');
+      // Point PDF.js worker at the matching CDN build
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+      const dropZone    = document.getElementById('dropZone');
+      const fileInput   = document.getElementById('fileInput');
+      const browseLink  = document.getElementById('browseLink');
+      const fileNameEl  = document.getElementById('fileName');
+      const convertBtn  = document.getElementById('convertBtn');
+      const statusEl    = document.getElementById('status');
       const progressWrap = document.getElementById('progressWrap');
-      const progressBar = document.getElementById('progressBar');
+      const progressBar  = document.getElementById('progressBar');
 
       let selectedFile = null;
 
@@ -196,36 +204,100 @@
         if (e.dataTransfer.files.length > 0) selectFile(e.dataTransfer.files[0]);
       });
 
+      /**
+       * Extract text lines from a PDF file using PDF.js.
+       * Groups text items into lines by their vertical (y) position on each page.
+       */
+      async function extractLinesFromPDF(file) {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const lines = [];
+
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+          const page = await pdf.getPage(pageNum);
+          const content = await page.getTextContent();
+
+          // Group text items by their rounded y-coordinate to reconstruct lines.
+          // transform[5] is the y translation in the PDF transformation matrix.
+          const lineMap = new Map();
+          for (const item of content.items) {
+            if (!item.str) continue; // skip items without text content
+            const y = Math.round(item.transform[5]);
+            if (!lineMap.has(y)) lineMap.set(y, []);
+            lineMap.get(y).push(item.str);
+          }
+
+          // Sort lines top-to-bottom (higher y = higher on page in PDF coords)
+          const sortedYs = Array.from(lineMap.keys()).sort((a, b) => b - a);
+          for (const y of sortedYs) {
+            const lineText = lineMap.get(y).join(' ').trim();
+            if (lineText.length > 0) lines.push(lineText);
+          }
+        }
+
+        return lines;
+      }
+
+      /**
+       * Build a docx Document from an array of text lines.
+       * Mirrors the heuristic used in the original server-side implementation.
+       */
+      function buildDocxFromLines(lines) {
+        const { Document, Packer, Paragraph, TextRun, HeadingLevel } = docx;
+
+        const paragraphs = lines.map((line) => {
+          const isHeading =
+            line.length > 0 &&
+            line.length <= 80 &&
+            line === line.toUpperCase() &&
+            /[A-Z]/.test(line);
+
+          if (isHeading) {
+            return new Paragraph({
+              heading: HeadingLevel.HEADING_1,
+              children: [new TextRun({ text: line, bold: true })],
+            });
+          }
+
+          return new Paragraph({ children: [new TextRun(line)] });
+        });
+
+        return new Document({
+          sections: [{
+            properties: {},
+            children: paragraphs.length > 0
+              ? paragraphs
+              : [new Paragraph({ children: [new TextRun('')] })],
+          }],
+        });
+      }
+
       convertBtn.addEventListener('click', async () => {
         if (!selectedFile) return;
 
         convertBtn.disabled = true;
-        setStatus('Uploading and converting…', 'info');
+        setStatus('Reading PDF…', 'info');
         progressWrap.style.display = 'block';
-        progressBar.style.width = '30%';
-
-        const formData = new FormData();
-        formData.append('file', selectedFile);
+        progressBar.style.width = '20%';
 
         try {
-          const response = await fetch('/convert', { method: 'POST', body: formData });
-          progressBar.style.width = '80%';
+          const lines = await extractLinesFromPDF(selectedFile);
+          progressBar.style.width = '60%';
 
-          if (!response.ok) {
-            const data = await response.json().catch(() => ({}));
-            throw new Error(data.error || 'Conversion failed.');
-          }
-
+          setStatus('Generating Word document…', 'info');
+          const doc = buildDocxFromLines(lines);
+          const blob = await docx.Packer.toBlob(doc);
           progressBar.style.width = '100%';
 
-          // Trigger file download
-          const blob = await response.blob();
+          // Derive output filename from the original PDF name
+          const baseName = selectedFile.name.replace(/\.pdf$/i, '');
+          const outputFilename = `${baseName}.docx`;
+
+          // Trigger browser download
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
-          const disposition = response.headers.get('Content-Disposition') || '';
-          const match = disposition.match(/filename="?([^"]+)"?/);
-          a.download = match ? match[1] : 'converted.docx';
           a.href = url;
+          a.download = outputFilename;
           document.body.appendChild(a);
           a.click();
           a.remove();
