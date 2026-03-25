@@ -293,17 +293,28 @@
           const baseName = selectedFile.name.replace(/\.pdf$/i, '');
           const outputFilename = `${baseName}.docx`;
 
-          // Trigger browser download
+          // Cross-platform file save.
+          // iOS Safari silently ignores the <a download> attribute for blob: URLs.
+          // Detect iOS by checking navigator.platform (stable across iOS versions).
+          // iPad on iOS 13+ reports 'MacIntel' but has maxTouchPoints > 1.
           const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = outputFilename;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(url);
-
-          setStatus('✅ Conversion complete! Your download should start automatically.', 'success');
+          const isIOS = /iPad|iPhone|iPod/.test(navigator.platform) ||
+                        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+          if (isIOS) {
+            window.open(url, '_blank');
+            setStatus('✅ Done! Use the Share button → Save to Files to keep the document.', 'success');
+          } else {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = outputFilename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setStatus('✅ Conversion complete! Your download should start automatically.', 'success');
+          }
+          // Delay revoke so the browser has time to start the download / open the tab.
+          // iOS needs slightly more time since it opens a new tab.
+          setTimeout(() => URL.revokeObjectURL(url), isIOS ? 1000 : 100);
         } catch (err) {
           setStatus('❌ ' + err.message, 'error');
         } finally {
