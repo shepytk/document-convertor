@@ -4,10 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Document Convertor — PDF to Word</title>
-    <!-- PDF.js for client-side PDF text extraction -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <!-- docx.js for client-side .docx generation -->
-    <script src="https://unpkg.com/docx@9.6.1/dist/index.iife.js"></script>
+
     <style>
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -153,10 +150,6 @@
     </div>
 
     <script>
-      // Point PDF.js worker at the matching CDN build
-      pdfjsLib.GlobalWorkerOptions.workerSrc =
-        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-
       const dropZone    = document.getElementById('dropZone');
       const fileInput   = document.getElementById('fileInput');
       const browseLink  = document.getElementById('browseLink');
@@ -171,6 +164,13 @@
       function setStatus(msg, type = 'info') {
         statusEl.textContent = msg;
         statusEl.className = 'status-' + type;
+      }
+
+      function hideProgress() {
+        setTimeout(() => {
+          progressWrap.style.display = 'none';
+          progressBar.style.width = '0%';
+        }, 1500);
       }
 
       function selectFile(file) {
@@ -205,125 +205,100 @@
       });
 
       /**
-       * Extract text lines from a PDF file using PDF.js.
-       * Groups text items into lines by their vertical (y) position on each page.
+       * Trigger a file download from a Blob, with an iOS-specific fallback.
+       * iOS Safari ignores the <a download> attribute for blob: URLs, so we
+       * open the file in a new tab and ask the user to save it manually.
        */
-      async function extractLinesFromPDF(file) {
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        const lines = [];
+      function downloadBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
 
-        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-          const page = await pdf.getPage(pageNum);
-          const content = await page.getTextContent();
+        // iPad on iOS 13+ reports 'MacIntel' but has maxTouchPoints > 1.
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.platform) ||
+                      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-          // Group text items by their rounded y-coordinate to reconstruct lines.
-          // transform[5] is the y translation in the PDF transformation matrix.
-          const lineMap = new Map();
-          for (const item of content.items) {
-            if (!item.str) continue; // skip items without text content
-            const y = Math.round(item.transform[5]);
-            if (!lineMap.has(y)) lineMap.set(y, []);
-            lineMap.get(y).push(item.str);
-          }
-
-          // Sort lines top-to-bottom (higher y = higher on page in PDF coords)
-          const sortedYs = Array.from(lineMap.keys()).sort((a, b) => b - a);
-          for (const y of sortedYs) {
-            const lineText = lineMap.get(y).join(' ').trim();
-            if (lineText.length > 0) lines.push(lineText);
-          }
+        if (isIOS) {
+          window.open(url, '_blank');
+          setStatus('✅ Done! Use the Share button → Save to Files to keep the document.', 'success');
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } else {
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setStatus('✅ Conversion complete! Your download should start automatically.', 'success');
+          setTimeout(() => URL.revokeObjectURL(url), 100);
         }
-
-        return lines;
       }
 
-      /**
-       * Build a docx Document from an array of text lines.
-       * Mirrors the heuristic used in the original server-side implementation.
-       */
-      function buildDocxFromLines(lines) {
-        const { Document, Packer, Paragraph, TextRun, HeadingLevel } = docx;
-
-        const paragraphs = lines.map((line) => {
-          const isHeading =
-            line.length > 0 &&
-            line.length <= 80 &&
-            line === line.toUpperCase() &&
-            /[A-Z]/.test(line);
-
-          if (isHeading) {
-            return new Paragraph({
-              heading: HeadingLevel.HEADING_1,
-              children: [new TextRun({ text: line, bold: true })],
-            });
-          }
-
-          return new Paragraph({ children: [new TextRun(line)] });
-        });
-
-        return new Document({
-          sections: [{
-            properties: {},
-            children: paragraphs.length > 0
-              ? paragraphs
-              : [new Paragraph({ children: [new TextRun('')] })],
-          }],
-        });
-      }
-
-      convertBtn.addEventListener('click', async () => {
+      convertBtn.addEventListener('click', () => {
         if (!selectedFile) return;
 
         convertBtn.disabled = true;
-        setStatus('Reading PDF…', 'info');
+        setStatus('Uploading PDF…', 'info');
         progressWrap.style.display = 'block';
-        progressBar.style.width = '20%';
+        progressBar.style.width = '0%';
 
-        try {
-          const lines = await extractLinesFromPDF(selectedFile);
-          progressBar.style.width = '60%';
+        const formData = new FormData();
+        formData.append('file', selectedFile);
 
-          setStatus('Generating Word document…', 'info');
-          const doc = buildDocxFromLines(lines);
-          const blob = await docx.Packer.toBlob(doc);
+        const CONVERSION_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
+
+        const xhr = new XMLHttpRequest();
+
+        // Track upload progress (0 → 90%).
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 90);
+            progressBar.style.width = pct + '%';
+          }
+        });
+
+        // Upload succeeded — server is now processing the file.
+        xhr.upload.addEventListener('load', () => {
+          progressBar.style.width = '90%';
+          setStatus('Converting…', 'info');
+        });
+
+        // Handle completed request (any HTTP status).
+        xhr.addEventListener('load', () => {
           progressBar.style.width = '100%';
 
-          // Derive output filename from the original PDF name
-          const baseName = selectedFile.name.replace(/\.pdf$/i, '');
-          const outputFilename = `${baseName}.docx`;
-
-          // Cross-platform file save.
-          // iOS Safari silently ignores the <a download> attribute for blob: URLs.
-          // Detect iOS by checking navigator.platform (stable across iOS versions).
-          // iPad on iOS 13+ reports 'MacIntel' but has maxTouchPoints > 1.
-          const url = URL.createObjectURL(blob);
-          const isIOS = /iPad|iPhone|iPod/.test(navigator.platform) ||
-                        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-          if (isIOS) {
-            window.open(url, '_blank');
-            setStatus('✅ Done! Use the Share button → Save to Files to keep the document.', 'success');
+          if (xhr.status === 200) {
+            const baseName = selectedFile.name.replace(/\.pdf$/i, '');
+            downloadBlob(xhr.response, `${baseName}.docx`);
           } else {
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = outputFilename;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            setStatus('✅ Conversion complete! Your download should start automatically.', 'success');
+            let msg = 'Conversion failed. Please try again.';
+            try {
+              const json = JSON.parse(xhr.responseText);
+              if (json && json.error) msg = json.error;
+            } catch (_) { /* ignore parse errors */ }
+            setStatus('❌ ' + msg, 'error');
           }
-          // Delay revoke so the browser has time to start the download / open the tab.
-          // iOS needs slightly more time since it opens a new tab.
-          setTimeout(() => URL.revokeObjectURL(url), isIOS ? 1000 : 100);
-        } catch (err) {
-          setStatus('❌ ' + err.message, 'error');
-        } finally {
+
           convertBtn.disabled = false;
-          setTimeout(() => {
-            progressWrap.style.display = 'none';
-            progressBar.style.width = '0%';
-          }, 1500);
-        }
+          hideProgress();
+        });
+
+        // Handle network-level errors (no response received).
+        xhr.addEventListener('error', () => {
+          setStatus('❌ Network error. Please check your connection and try again.', 'error');
+          convertBtn.disabled = false;
+          hideProgress();
+        });
+
+        // Handle request timeout.
+        xhr.addEventListener('timeout', () => {
+          setStatus('❌ Request timed out. Please try again.', 'error');
+          convertBtn.disabled = false;
+          hideProgress();
+        });
+
+        xhr.open('POST', '/convert');
+        xhr.responseType = 'blob';
+        xhr.timeout = CONVERSION_TIMEOUT_MS;
+        xhr.send(formData);
       });
     </script>
   </body>
