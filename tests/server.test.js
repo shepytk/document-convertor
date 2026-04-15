@@ -103,6 +103,15 @@ test('GET / serves the HTML frontend', async () => {
   assert.ok(html.includes('/convert'));
 });
 
+test('GET /tlb/ serves the TLB finder page', async () => {
+  const res = await get(`${baseUrl}/tlb/`);
+  assert.equal(res.status, 200);
+  assert.ok(res.headers['content-type'].includes('text/html'));
+  const html = res.body.toString();
+  assert.ok(html.includes('JCB 3CX Finder'));
+  assert.ok(html.includes('R350&nbsp;000 – R450&nbsp;000'));
+});
+
 test('POST /convert with a valid PDF returns a .docx file', async () => {
   const res = await postFile(`${baseUrl}/convert`, 'file', 'test.pdf', 'application/pdf', MINIMAL_PDF);
   assert.equal(res.status, 200);

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JCB 3CX Finder SA – R350 000 to R450 000</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ===== HEADER ===== -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-icon">🚜</span>
+        <div>
+          <h1>JCB 3CX Finder <span class="logo-za">SA</span></h1>
+          <p class="logo-sub">JCB 3CX · R350&nbsp;000 – R450&nbsp;000</p>
+        </div>
+      </div>
+      <div class="header-meta">
+        <span id="lastUpdated" class="badge badge--info">Loading…</span>
+        <span id="totalCount"  class="badge badge--count">0 listings</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===== CONTROLS ===== -->
+  <section class="controls-bar">
+    <div class="controls-inner">
+
+      <!-- Search -->
+      <div class="control-group">
+        <label for="searchInput">🔍 Search</label>
+        <input id="searchInput" type="text" placeholder="Brand, model, location…" />
+      </div>
+
+      <!-- Price filter -->
+      <div class="control-group">
+        <label for="priceRange">
+          Max price: <strong id="priceLabel">R 450,000</strong>
+        </label>
+        <input id="priceRange" type="range"
+               min="350000" max="450000" step="10000" value="450000" />
+      </div>
+
+      <!-- Brand filter -->
+      <div class="control-group">
+        <label for="brandFilter">Brand</label>
+        <select id="brandFilter">
+          <option value="">All brands</option>
+        </select>
+      </div>
+
+      <!-- Province filter -->
+      <div class="control-group">
+        <label for="provinceFilter">Province</label>
+        <select id="provinceFilter">
+          <option value="">All provinces</option>
+        </select>
+      </div>
+
+      <!-- Sort -->
+      <div class="control-group">
+        <label for="sortSelect">Sort by</label>
+        <select id="sortSelect">
+          <option value="price_asc">Price: Low → High</option>
+          <option value="price_desc">Price: High → Low</option>
+          <option value="year_desc">Newest first</option>
+          <option value="year_asc">Oldest first</option>
+        </select>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===== MAIN CONTENT ===== -->
+  <main class="container">
+    <div id="noResults" class="no-results hidden">
+      <span>😕</span>
+      <p>No listings match your filters.</p>
+    </div>
+    <div id="listingsGrid" class="listings-grid"></div>
+  </main>
+
+  <!-- ===== FOOTER ===== -->
+  <footer class="site-footer">
+    <p>
+      Data scraped from <a href="https://www.mascus.co.za" target="_blank" rel="noopener">Mascus ZA</a>.
+      Prices listed in South African Rand (ZAR).
+      Last automated refresh via GitHub Actions.
+    </p>
+    <p class="disclaimer">
+      This is an independent aggregator. Always verify listings directly with the seller.
+    </p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
